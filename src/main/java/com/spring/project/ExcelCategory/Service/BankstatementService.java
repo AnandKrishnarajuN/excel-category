@@ -158,23 +158,42 @@ public class BankstatementService {
 		}
 	}
 
-	private List<String[]> extractFromExcel(MultipartFile file) throws IOException {
+	private List<String[]> extractFromExcel(MultipartFile file) throws IOException, ParseException {
 		List<String[]> data = new ArrayList<>();
+		List<BankstatementData> transactions = new ArrayList<>();
 		Workbook workbook = WorkbookFactory.create(file.getInputStream());
 		Sheet sheet = workbook.getSheetAt(0);
 
 		for (Row row : sheet) {
-			String[] rowData = new String[5]; // Date, Description, Deposit, Withdrawal, Balance
+			String[] rowData = new String[row.getLastCellNum()]; // Date, Description, Deposit, Withdrawal, Balance
 
-			for (int i = 0; i < 5 && i < row.getLastCellNum(); i++) {
+			for (int i = 0; i < row.getLastCellNum(); i++) {
 				Cell cell = row.getCell(i);
 				rowData[i] = (cell != null) ? getStringCellValue(cell) : "";
+			}
+
+			if (rowData[1].matches("^\\d{2}-\\d{2}-\\d{4}.*") || rowData[1].matches("^\\d{2}/\\d{2}/\\d{4}.*") || rowData[1].matches("^\\d{2}/\\d{2}/\\d{2}.*") || rowData[1].matches("^\\d{2}-\\d{2}-\\d{2}.*")) {
+				String date = rowData[1];
+				String narration = rowData[3];
+				String withdrawal = rowData[5];
+				String deposit = rowData[6];
+				String balance = rowData[7];
+				String category = TransactionCategory.categorize(narration);
+
+				//Prpare Data For Transaction
+				Date dbDate = parseDate(date);
+				double dbBalance = Double.parseDouble(balance);
+				double dbDeposit = deposit.isEmpty() || !deposit.matches("\\d+(\\.\\d+)?") ? 0.0 : Double.parseDouble(deposit.trim());
+				double dbWithdrawal = withdrawal.isEmpty() || !withdrawal.matches("\\d+(\\.\\d+)?") ? 0.0 : Double.parseDouble(withdrawal.trim());
+
+				transactions.add(new BankstatementData(narration, dbDeposit, dbWithdrawal, dbDate, dbBalance, category));
 			}
 
 			data.add(rowData);
 		}
 
 		workbook.close();
+		saveAllBankStatements(transactions);
 		return data;
 	}
 
