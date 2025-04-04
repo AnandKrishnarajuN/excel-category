@@ -19,24 +19,24 @@ public class BankstatementData {
 	private double withdrawl;
 	private Date date;
 	private double balance;
-		
-	
-	
+	private String category;
+
 	public BankstatementData() {
 		super();
 	}
-	public BankstatementData(String description, double deposit, double withdrawl, Date date, double balance) {
+	public BankstatementData(String description, double deposit, double withdrawl, Date date, double balance, String category) {
 		super();
 		this.description = description;
 		this.deposit = deposit;
 		this.withdrawl = withdrawl;
 		this.date = date;
 		this.balance = balance;
+		this.category = category;
 	}
 	@Override
 	public String toString() {
 		return "BankstatementData [id=" + id + ", description=" + description + ", deposit=" + deposit + ", withdrawl="
-				+ withdrawl + ", date=" + date + ", balance=" + balance + "]";
+				+ withdrawl + ", date=" + date + ", balance=" + balance + ", category=" + category + "]";
 	}
 	public long getId() {
 		return id;
@@ -74,5 +74,10 @@ public class BankstatementData {
 	public void setBalance(double balance) {
 		this.balance = balance;
 	}
-	
+	public String getCategory() {
+		return category;
+	}
+	public void setCategory(String category) {
+		this.category = category;
+	}
 }

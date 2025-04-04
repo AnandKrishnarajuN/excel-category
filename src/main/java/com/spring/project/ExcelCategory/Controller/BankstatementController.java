@@ -1,6 +1,7 @@
 package com.spring.project.ExcelCategory.Controller;
 
 import java.io.IOException;
+import java.text.ParseException;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.ByteArrayResource;
@@ -27,7 +28,7 @@ public class BankstatementController {
     public ResponseEntity<ByteArrayResource> convertStatement(
             @RequestParam("file") MultipartFile file,
             @RequestParam(value = "password", required = false) String password
-    ) throws IOException {
+    ) throws IOException, ParseException {
 
         byte[] convertedExcel = bankStatementService.extractAndExportData(file, password);
         ByteArrayResource resource = new ByteArrayResource(convertedExcel);
