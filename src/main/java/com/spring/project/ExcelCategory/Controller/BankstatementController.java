@@ -28,7 +28,7 @@ public class BankstatementController {
     public ResponseEntity<ByteArrayResource> convertStatement(
             @RequestParam("file") MultipartFile file,
             @RequestParam(value = "password", required = false) String password
-    ) throws IOException, ParseException {
+    ) throws Exception {
 
         byte[] convertedExcel = bankStatementService.extractAndExportData(file, password);
         ByteArrayResource resource = new ByteArrayResource(convertedExcel);

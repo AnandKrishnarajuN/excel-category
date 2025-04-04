@@ -6,6 +6,10 @@ import com.spring.project.ExcelCategory.Model.TransactionCategory;
 import com.spring.project.ExcelCategory.Repository.TransactionRepository;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
+import org.apache.poi.openxml4j.opc.OPCPackage;
+import org.apache.poi.poifs.crypt.Decryptor;
+import org.apache.poi.poifs.crypt.EncryptionInfo;
+import org.apache.poi.poifs.filesystem.POIFSFileSystem;
 import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.slf4j.Logger;
@@ -16,6 +20,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -33,7 +38,7 @@ public class BankstatementService {
 
 	private static final Logger logger = LoggerFactory.getLogger(BankstatementService.class);
 
-	public byte[] extractAndExportData(MultipartFile file, String password) throws IOException, ParseException {
+	public byte[] extractAndExportData(MultipartFile file, String password) throws Exception {
 		List<String[]> extractedData;
 
 		String filename = file.getOriginalFilename();
@@ -42,7 +47,7 @@ public class BankstatementService {
 		if (filename.endsWith(".pdf")) {
 			extractedData = extractFromPDF(file.getBytes(), password);
 		} else if (filename.endsWith(".xls") || filename.endsWith(".xlsx")) {
-			extractedData = extractFromExcel(file);
+			extractedData = extractFromExcel(file, password);
 		} else {
 			throw new IllegalArgumentException("Unsupported file type");
 		}
@@ -101,7 +106,7 @@ public class BankstatementService {
 					String narration = String.join(" ", Arrays.copyOfRange(tokens, 1, tokens.length - 3));
 					String category = TransactionCategory.categorize(narration);
 
-					if(amount.equals("error") || balance.equals("error")) continue;
+					if (amount.equals("error") || balance.equals("error")) continue;
 
 					String deposit = "";
 					String withdrawal = "";
@@ -148,7 +153,7 @@ public class BankstatementService {
 			// Remove commas before parsing
 			data = data.replace(",", "");
 
-			if (!data.matches("-?\\d+(\\.\\d+)?")){
+			if (!data.matches("-?\\d+(\\.\\d+)?")) {
 				return "error";
 			}
 			return data;
@@ -158,43 +163,57 @@ public class BankstatementService {
 		}
 	}
 
-	private List<String[]> extractFromExcel(MultipartFile file) throws IOException, ParseException {
+	private List<String[]> extractFromExcel(MultipartFile file, String password) throws Exception {
 		List<String[]> data = new ArrayList<>();
 		List<BankstatementData> transactions = new ArrayList<>();
-		Workbook workbook = WorkbookFactory.create(file.getInputStream());
-		Sheet sheet = workbook.getSheetAt(0);
 
-		for (Row row : sheet) {
-			String[] rowData = new String[row.getLastCellNum()]; // Date, Description, Deposit, Withdrawal, Balance
+		try (InputStream inputStream = file.getInputStream()) {
+			POIFSFileSystem fs = new POIFSFileSystem(inputStream);
+			EncryptionInfo info = new EncryptionInfo(fs);
+			Decryptor decryptor = Decryptor.getInstance(info);
 
-			for (int i = 0; i < row.getLastCellNum(); i++) {
-				Cell cell = row.getCell(i);
-				rowData[i] = (cell != null) ? getStringCellValue(cell) : "";
+			if (!decryptor.verifyPassword(password)) {
+				throw new RuntimeException("Invalid Excel password");
 			}
 
-			if (rowData[1].matches("^\\d{2}-\\d{2}-\\d{4}.*") || rowData[1].matches("^\\d{2}/\\d{2}/\\d{4}.*") || rowData[1].matches("^\\d{2}/\\d{2}/\\d{2}.*") || rowData[1].matches("^\\d{2}-\\d{2}-\\d{2}.*")) {
-				String date = rowData[1];
-				String narration = rowData[3];
-				String withdrawal = rowData[5];
-				String deposit = rowData[6];
-				String balance = rowData[7];
-				String category = TransactionCategory.categorize(narration);
+			try (OPCPackage opc = OPCPackage.open(decryptor.getDataStream(fs));
+				 Workbook workbook = new XSSFWorkbook(opc)) {
+				Sheet sheet = workbook.getSheetAt(0);
 
-				//Prpare Data For Transaction
-				Date dbDate = parseDate(date);
-				double dbBalance = Double.parseDouble(balance);
-				double dbDeposit = deposit.isEmpty() || !deposit.matches("\\d+(\\.\\d+)?") ? 0.0 : Double.parseDouble(deposit.trim());
-				double dbWithdrawal = withdrawal.isEmpty() || !withdrawal.matches("\\d+(\\.\\d+)?") ? 0.0 : Double.parseDouble(withdrawal.trim());
+				for (Row row : sheet) {
+					if (row == null || row.getLastCellNum() <= 0) continue;
+					String[] rowData = new String[row.getLastCellNum()]; // Date, Description, Deposit, Withdrawal, Balance
 
-				transactions.add(new BankstatementData(narration, dbDeposit, dbWithdrawal, dbDate, dbBalance, category));
+					for (int i = 0; i < row.getLastCellNum(); i++) {
+						Cell cell = row.getCell(i);
+						rowData[i] = (cell != null) ? getStringCellValue(cell) : "";
+					}
+
+					if (rowData[1].matches("^\\d{2}-\\d{2}-\\d{4}.*") || rowData[1].matches("^\\d{2}/\\d{2}/\\d{4}.*") || rowData[1].matches("^\\d{2}/\\d{2}/\\d{2}.*") || rowData[1].matches("^\\d{2}-\\d{2}-\\d{2}.*")) {
+						String date = rowData[1];
+						String narration = rowData[3];
+						String withdrawal = rowData[5];
+						String deposit = rowData[6];
+						String balance = rowData[7];
+						String category = TransactionCategory.categorize(narration);
+
+						//Prepare Data For Transaction
+						Date dbDate = parseDate(date);
+						double dbBalance = Double.parseDouble(balance);
+						double dbDeposit = deposit.isEmpty() || !deposit.matches("\\d+(\\.\\d+)?") ? 0.0 : Double.parseDouble(deposit.trim());
+						double dbWithdrawal = withdrawal.isEmpty() || !withdrawal.matches("\\d+(\\.\\d+)?") ? 0.0 : Double.parseDouble(withdrawal.trim());
+
+						transactions.add(new BankstatementData(narration, dbDeposit, dbWithdrawal, dbDate, dbBalance, category));
+					}
+
+					data.add(rowData);
+				}
+
+				workbook.close();
+				saveAllBankStatements(transactions);
+				return data;
 			}
-
-			data.add(rowData);
 		}
-
-		workbook.close();
-		saveAllBankStatements(transactions);
-		return data;
 	}
 
 	public void saveAllBankStatements(List<BankstatementData> transactions) {
@@ -233,7 +252,6 @@ public class BankstatementService {
 
 		throw new ParseException("Unparseable date: " + date, 0);
 	}
-
 
 
 	private String getStringCellValue(Cell cell) {
